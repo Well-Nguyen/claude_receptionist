@@ -1,0 +1,4 @@
+<!-- HARNESS:BEGIN -->
+@AGENTS.md
+@docs/FEATURE_INTAKE.md
+<!-- HARNESS:END -->

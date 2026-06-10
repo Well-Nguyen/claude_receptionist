@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY ai/pyproject.toml ./
+RUN pip install --no-cache-dir ".[dev]" 2>/dev/null || pip install --no-cache-dir .
+
+COPY ai/ .
+
+ENV AI_WS_PORT=7700
+
+EXPOSE 7700
+
+CMD ["python", "main.py"]

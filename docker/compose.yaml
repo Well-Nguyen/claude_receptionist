@@ -1,0 +1,77 @@
+name: receptionist
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: receptionist
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d receptionist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  be:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.be
+    environment:
+      DATABASE_URL: postgresql+asyncpg://app:app@db:5432/receptionist
+    ports:
+      - "9000:9000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  ai:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ai
+    environment:
+      AI_WS_PORT: "7700"
+      BE_BASE_URL: "http://be:9000"
+      SESSION_IDLE_TIMEOUT_S: "30"
+      # LLM / STT / TTS set via .env or overrides
+    ports:
+      - "7700:7700"
+    depends_on:
+      - be
+    # gpu profile: override with --gpus all
+    profiles: ["cpu", "gpu"]
+    deploy:
+      resources:
+        reservations:
+          devices: []  # overridden in gpu profile below
+
+  ai-gpu:
+    extends:
+      service: ai
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles: ["gpu"]
+
+  fe:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.fe
+    environment:
+      NEXT_PUBLIC_AI_WS_URL: "ws://localhost:7700/ws"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ai
+    profiles: ["cpu", "gpu"]
+
+volumes:
+  pg_data:

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/bin/harness-cli query *)",
+      "Bash(scripts/bin/harness-cli query)"
+    ]
+  }
+}
