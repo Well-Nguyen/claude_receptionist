@@ -41,6 +41,7 @@ class Session:
     active_gen_task: Optional[asyncio.Task] = field(default=None, repr=False)
     idle_timer_task: Optional[asyncio.Task] = field(default=None, repr=False)
     latency_log: List[LatencyRecord] = field(default_factory=list)
+    pcm_buffer: List[bytes] = field(default_factory=list)
 
 
 class SessionRegistry:

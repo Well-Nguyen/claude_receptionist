@@ -48,3 +48,11 @@ class LanguageSelectEvent(BaseModel):
     event: Literal["language_select"] = "language_select"
     session_id: str
     language: Literal["en", "vi"]
+
+
+class VadConfigEvent(BaseModel):
+    event: Literal["vad_config"] = "vad_config"
+    silence_ms: int
+    min_speech_ms: int
+    threshold: float
+    barge_in_min_ms: int

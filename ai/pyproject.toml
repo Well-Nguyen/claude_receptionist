@@ -22,6 +22,33 @@ dev = [
     "httpx>=0.27",
     "starlette>=0.37",
 ]
+# P1 model dependencies — install the group matching your target hardware
+vi-stt = [
+    "sherpa-onnx>=1.10",
+    "huggingface_hub>=0.23",
+    "numpy>=1.26",
+    "soundfile>=0.12",
+]
+en-stt = [
+    "nemo_toolkit[asr]>=2.0",
+    "numpy>=1.26",
+]
+vi-tts = [
+    "torch>=2.3",
+    "numpy>=1.26",
+]
+en-tts = [
+    "chatterbox-tts>=0.1",
+    "torch>=2.3",
+    "torchaudio>=2.3",
+    "numpy>=1.26",
+]
+models = [
+    "ai-service[vi-stt]",
+    "ai-service[en-stt]",
+    "ai-service[vi-tts]",
+    "ai-service[en-tts]",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

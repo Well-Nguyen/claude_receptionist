@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -12,13 +13,13 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from orchestrator.sentence_splitter import split_sentences
 from orchestrator.state import LatencyRecord, SessionRegistry, SessionState, SESSION_IDLE_TIMEOUT_S
 from orchestrator.stub_llm import stub_llm
-from orchestrator.stub_stt import stub_stt
-from orchestrator.stub_tts import stub_tts_b64
+from services.model_registry import registry as model_registry
 from shared.schemas.events import (
     AudioChunkEvent,
     SessionStartEvent,
     StateChangeEvent,
     TranscriptEvent,
+    VadConfigEvent,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ _GREETINGS = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    model_registry.load()
     gc_task = asyncio.create_task(registry.gc_loop())
     try:
         yield
@@ -43,6 +45,7 @@ async def lifespan(app: FastAPI):
             await gc_task
         except asyncio.CancelledError:
             pass
+        model_registry.close()
 
 
 app = FastAPI(title="AI Service", lifespan=lifespan)
@@ -51,6 +54,16 @@ app = FastAPI(title="AI Service", lifespan=lifespan)
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "sessions": len(registry)}
+
+
+@app.get("/config/vad")
+async def get_vad_config() -> dict:
+    return {
+        "silence_ms": int(os.getenv("VAD_SILENCE_MS", "800")),
+        "min_speech_ms": int(os.getenv("VAD_MIN_SPEECH_MS", "250")),
+        "threshold": float(os.getenv("VAD_THRESHOLD", "0.5")),
+        "barge_in_min_ms": int(os.getenv("BARGE_IN_MIN_MS", "300")),
+    }
 
 
 @app.get("/sessions/{session_id}/latency")
@@ -93,9 +106,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             session = registry.get(session_id)
             if session:
                 _reset_idle_timer(session, session_id, websocket)
-            # binary frame: raw PCM audio (processed in US-P0-3+)
+            # binary frame: raw 16 kHz mono Int16 PCM from FE capture
             if "bytes" in message and message["bytes"] is not None:
-                pass
+                if session and session.state == SessionState.LISTENING:
+                    session.pcm_buffer.append(message["bytes"])
             # text frame: JSON control event
             elif "text" in message and message["text"] is not None:
                 await _handle_event(session_id, message["text"], websocket)
@@ -115,6 +129,7 @@ def _reset_session(session) -> None:
     session.state = SessionState.LANDING
     session.language = None
     session.gen_id = str(uuid.uuid4())
+    session.pcm_buffer.clear()
 
 
 async def _idle_timer(
@@ -173,7 +188,10 @@ async def _on_utterance_end(
     session.state = SessionState.THINKING
     await websocket.send_text(StateChangeEvent(state="THINKING").model_dump_json())
 
-    transcript = stub_stt(b"")
+    pcm = b"".join(session.pcm_buffer)
+    session.pcm_buffer.clear()
+    stt = model_registry.stt_for(session.language or "en")
+    transcript = await asyncio.get_event_loop().run_in_executor(None, stt.transcribe, pcm)
     rec.stt_done_ms = time.time() * 1000
     await websocket.send_text(
         TranscriptEvent(role="user", text=transcript, session_id=session_id).model_dump_json()
@@ -212,7 +230,9 @@ async def _run_generation(
             await asyncio.sleep(0)  # yield so interrupt events can be processed
             if session.gen_id != gen_id:
                 return
-            audio_b64 = stub_tts_b64(seg.text)
+            tts = model_registry.tts_for(session.language or "en")
+            pcm_out = await asyncio.get_event_loop().run_in_executor(None, tts.synthesize, seg.text)
+            audio_b64 = base64.b64encode(pcm_out).decode()
             if first_chunk:
                 if rec is not None:
                     rec.tts_first_audio_ms = time.time() * 1000
