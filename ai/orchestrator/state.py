@@ -4,11 +4,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 
 
-SESSION_GC_TIMEOUT = 5.0   # seconds after disconnect before eviction
-SESSION_GC_INTERVAL = 1.0  # polling interval for the GC loop
+SESSION_GC_TIMEOUT = 5.0        # seconds after disconnect before eviction
+SESSION_GC_INTERVAL = 1.0       # polling interval for the GC loop
+SESSION_IDLE_TIMEOUT_S = 30.0   # seconds of no events before auto-reset
 
 
 class SessionState(str, Enum):
@@ -20,6 +21,17 @@ class SessionState(str, Enum):
 
 
 @dataclass
+class LatencyRecord:
+    session_id: str
+    turn_id: str
+    utterance_end_ms: Optional[float] = None
+    stt_done_ms: Optional[float] = None
+    llm_first_token_ms: Optional[float] = None
+    tts_first_audio_ms: Optional[float] = None
+    fe_first_play_ms: Optional[float] = None
+
+
+@dataclass
 class Session:
     session_id: str
     language: Optional[str] = None
@@ -27,6 +39,8 @@ class Session:
     gen_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     disconnected_at: Optional[float] = None  # monotonic timestamp, None = connected
     active_gen_task: Optional[asyncio.Task] = field(default=None, repr=False)
+    idle_timer_task: Optional[asyncio.Task] = field(default=None, repr=False)
+    latency_log: List[LatencyRecord] = field(default_factory=list)
 
 
 class SessionRegistry:
