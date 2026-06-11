@@ -26,6 +26,7 @@ class Session:
     state: SessionState = SessionState.LANDING
     gen_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     disconnected_at: Optional[float] = None  # monotonic timestamp, None = connected
+    active_gen_task: Optional[asyncio.Task] = field(default=None, repr=False)
 
 
 class SessionRegistry:

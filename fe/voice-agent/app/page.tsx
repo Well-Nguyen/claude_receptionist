@@ -20,6 +20,7 @@ export default function Page() {
   const sessionIdRef = useRef<string | null>(null);
   const wsRef = useRef<WsClient | null>(null);
   const playerRef = useRef<PlayerHandle | null>(null);
+  const currentGenIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const client = createWsClient(WS_URL, {
@@ -39,6 +40,7 @@ export default function Page() {
         } else if (e.event === "transcript") {
           setTranscripts((prev) => [...prev, { role: e.role, text: e.text }]);
         } else if (e.event === "audio_chunk") {
+          currentGenIdRef.current = e.gen_id;
           if (!playerRef.current) {
             playerRef.current = createAudioPlayer();
           }
@@ -94,6 +96,52 @@ export default function Page() {
       })
       .catch((err) => {
         console.error("Mic access error:", err);
+      });
+
+    return () => {
+      cancelled = true;
+      captureHandle?.stop();
+      vad.reset();
+    };
+  }, [appState]);
+
+  // Barge-in: mic capture during SPEAKING to detect user speech ≥ BARGE_IN_MIN_MS.
+  useEffect(() => {
+    if (appState !== "speaking") return;
+
+    let captureHandle: CaptureHandle | null = null;
+    let cancelled = false;
+    let fired = false;
+
+    const vad = createVad({
+      onSpeechStart: () => {
+        if (fired) return;
+        fired = true;
+        playerRef.current?.reset();
+        const sid = sessionIdRef.current;
+        const genId = currentGenIdRef.current;
+        if (sid && genId && wsRef.current) {
+          wsRef.current.send({ event: "interrupt", gen_id: genId });
+        }
+      },
+      onSpeechEnd: () => {},
+    }, {
+      minSpeechMs: 300,
+      threshold: 0.04, // raised threshold: AEC guard against agent audio bleed
+    });
+
+    startCapture((pcm) => {
+      vad.processChunk(pcm);
+    })
+      .then((h) => {
+        if (cancelled) {
+          h.stop();
+        } else {
+          captureHandle = h;
+        }
+      })
+      .catch((err) => {
+        console.error("Barge-in mic error:", err);
       });
 
     return () => {

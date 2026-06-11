@@ -89,6 +89,8 @@ async def _handle_event(session_id: str, raw: str, websocket: WebSocket) -> None
         await _on_language_select(session_id, payload, websocket)
     elif event == "utterance_end":
         await _on_utterance_end(session_id, payload, websocket)
+    elif event == "interrupt":
+        await _on_interrupt(session_id, payload)
 
 
 async def _on_utterance_end(
@@ -106,7 +108,6 @@ async def _on_utterance_end(
         TranscriptEvent(role="user", text=transcript, session_id=session_id).model_dump_json()
     )
 
-    # Stub LLM → sentence split → domino TTS
     reply = stub_llm(transcript, session.language or "en")
     gen_id = str(uuid.uuid4())
     segments = split_sentences(reply, gen_id)
@@ -115,17 +116,58 @@ async def _on_utterance_end(
     session.gen_id = gen_id
     await websocket.send_text(StateChangeEvent(state="SPEAKING").model_dump_json())
 
-    for seg in segments:
-        audio_b64 = stub_tts_b64(seg.text)
-        await websocket.send_text(
-            AudioChunkEvent(seq=seg.seq, gen_id=gen_id, data=audio_b64).model_dump_json()
-        )
-
-    await websocket.send_text(
-        TranscriptEvent(role="assistant", text=reply, session_id=session_id).model_dump_json()
+    task = asyncio.create_task(
+        _run_generation(session, session_id, websocket, gen_id, segments, reply)
     )
-    session.state = SessionState.LISTENING
-    await websocket.send_text(StateChangeEvent(state="LISTENING").model_dump_json())
+    session.active_gen_task = task
+
+
+async def _run_generation(
+    session,
+    session_id: str,
+    websocket: WebSocket,
+    gen_id: str,
+    segments,
+    reply: str,
+) -> None:
+    try:
+        for seg in segments:
+            await asyncio.sleep(0)  # yield so interrupt events can be processed
+            if session.gen_id != gen_id:
+                return
+            audio_b64 = stub_tts_b64(seg.text)
+            await websocket.send_text(
+                AudioChunkEvent(seq=seg.seq, gen_id=gen_id, data=audio_b64).model_dump_json()
+            )
+
+        await websocket.send_text(
+            TranscriptEvent(role="assistant", text=reply, session_id=session_id).model_dump_json()
+        )
+        session.state = SessionState.LISTENING
+        await websocket.send_text(StateChangeEvent(state="LISTENING").model_dump_json())
+    except asyncio.CancelledError:
+        session.state = SessionState.LISTENING
+        try:
+            await websocket.send_text(StateChangeEvent(state="LISTENING").model_dump_json())
+        except Exception:
+            pass
+    except Exception:
+        # WebSocket closed or transport error while generation was in flight.
+        session.state = SessionState.LISTENING
+
+
+async def _on_interrupt(session_id: str, payload: dict) -> None:
+    session = registry.get(session_id)
+    if session is None or session.state != SessionState.SPEAKING:
+        return
+
+    gen_id = payload.get("gen_id")
+    if not gen_id or gen_id != session.gen_id:
+        return
+
+    task = session.active_gen_task
+    if task and not task.done():
+        task.cancel()
 
 
 async def _on_language_select(
