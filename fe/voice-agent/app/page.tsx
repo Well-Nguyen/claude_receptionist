@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Landing from "@/pages/Landing";
-import { createWsClient, WsClient } from "@/ws/client";
+import { createWsClient, WsClient, VadConfigPayload } from "@/ws/client";
 import { startCapture, CaptureHandle } from "@/audio/capture";
 import { createVad } from "@/audio/vad";
 import { createAudioPlayer, PlayerHandle } from "@/audio/player";
@@ -21,6 +21,7 @@ export default function Page() {
   const wsRef = useRef<WsClient | null>(null);
   const playerRef = useRef<PlayerHandle | null>(null);
   const currentGenIdRef = useRef<string | null>(null);
+  const vadConfigRef = useRef<VadConfigPayload | null>(null);
 
   useEffect(() => {
     const client = createWsClient(WS_URL, {
@@ -34,6 +35,8 @@ export default function Page() {
           playerRef.current?.reset();
           setTranscripts([]);
           setAppState("landing");
+        } else if (e.event === "vad_config") {
+          vadConfigRef.current = e;
         } else if (e.event === "state_change") {
           const s = e.state.toLowerCase() as AppState;
           setAppState(s);
@@ -68,6 +71,7 @@ export default function Page() {
     let cancelled = false;
     let voiceActive = false;
 
+    const cfg = vadConfigRef.current;
     const vad = createVad({
       onSpeechStart: () => {
         voiceActive = true;
@@ -79,7 +83,11 @@ export default function Page() {
           wsRef.current.send({ event: "utterance_end", session_id: sid });
         }
       },
-    });
+    }, cfg ? {
+      silenceMs: cfg.silence_ms,
+      minSpeechMs: cfg.min_speech_ms,
+      threshold: cfg.threshold,
+    } : {});
 
     startCapture((pcm) => {
       vad.processChunk(pcm);
@@ -113,6 +121,7 @@ export default function Page() {
     let cancelled = false;
     let fired = false;
 
+    const cfg = vadConfigRef.current;
     const vad = createVad({
       onSpeechStart: () => {
         if (fired) return;
@@ -126,8 +135,9 @@ export default function Page() {
       },
       onSpeechEnd: () => {},
     }, {
-      minSpeechMs: 300,
-      threshold: 0.04, // raised threshold: AEC guard against agent audio bleed
+      minSpeechMs: cfg?.barge_in_min_ms ?? 300,
+      // Double the listening threshold during SPEAKING to suppress echo bleed.
+      threshold: cfg ? cfg.threshold * 2 : 0.04,
     });
 
     startCapture((pcm) => {

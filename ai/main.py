@@ -22,6 +22,15 @@ from shared.schemas.events import (
     VadConfigEvent,
 )
 
+
+def _build_vad_config_event() -> VadConfigEvent:
+    return VadConfigEvent(
+        silence_ms=int(os.getenv("VAD_SILENCE_MS", "800")),
+        min_speech_ms=int(os.getenv("VAD_MIN_SPEECH_MS", "250")),
+        threshold=float(os.getenv("VAD_THRESHOLD", "0.5")),
+        barge_in_min_ms=int(os.getenv("BARGE_IN_MIN_MS", "300")),
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -96,6 +105,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
     await websocket.send_text(
         SessionStartEvent(session_id=session_id).model_dump_json()
     )
+    await websocket.send_text(_build_vad_config_event().model_dump_json())
 
     try:
         while True:

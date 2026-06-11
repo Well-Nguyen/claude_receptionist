@@ -1,5 +1,13 @@
+export type VadConfigPayload = {
+  silence_ms: number;
+  min_speech_ms: number;
+  threshold: number;
+  barge_in_min_ms: number;
+};
+
 export type AppEvent =
   | { event: "session_start"; session_id: string; language: string | null }
+  | { event: "vad_config" } & VadConfigPayload
   | { event: "state_change"; state: string }
   | { event: "transcript"; role: "user" | "assistant"; text: string; session_id: string }
   | { event: "audio_chunk"; seq: number; gen_id: string; data: string };

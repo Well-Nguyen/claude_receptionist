@@ -2,7 +2,7 @@
 
 ## Status
 
-planned
+implemented
 
 ## Lane
 
@@ -56,3 +56,15 @@ None.
 
 ## Evidence
 
+- `ai/main.py`: `_build_vad_config_event()` reads all four env vars; `VadConfigEvent`
+  is sent over WS immediately after `SessionStartEvent` on every new connection.
+- `ai/main.py`: `/config/vad` HTTP endpoint unchanged — still available for polling.
+- `fe/voice-agent/ws/client/index.ts`: `AppEvent` union extended with `vad_config`.
+- `fe/voice-agent/app/page.tsx`: `vadConfigRef` stores server config; LISTENING VAD
+  uses `silence_ms`, `min_speech_ms`, `threshold`; SPEAKING (barge-in) VAD uses
+  `barge_in_min_ms` + `threshold * 2` for echo suppression.
+- `ai/tests/unit/test_vad_config.py`: 3 unit tests — defaults, env override, required fields.
+- `ai/tests/integration/test_vad_config.py`: 3 integration tests — event ordering,
+  fields present, env vars reflected in WS payload.
+- Release gate (false barge-in ≤ 5%): manual noise test on real hardware; deferred
+  to release validation. Silero WASM also deferred to P1.5/P2 (energy VAD sufficient).
